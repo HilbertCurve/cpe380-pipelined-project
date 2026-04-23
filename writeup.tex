@@ -1,0 +1,135 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+% The preceding line is only needed to identify funding in the first footnote. If that is unneeded, please comment it out.
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+\begin{document}
+
+\title{CPE380 Project 3: Pipelined Instruction Implementation}
+
+\author{\IEEEauthorblockN{1\textsuperscript{st} Xavier Jones}
+\IEEEauthorblockA{\textit{Department of Electrical and Computer Engineering} \\
+\textit{University of Kentucky College of Engineering}\\
+Lexington, Kentucky, USA \\
+xcjo222@uky.edu}
+\and
+\IEEEauthorblockN{2\textsuperscript{nd} Benjamin Carey}
+\IEEEauthorblockA{\textit{Department of Computer Science} \\
+\textit{University of Kentucky College of Engineering}\\
+Lexington, Kentucky, USA \\
+bjca251@uky.edu}
+\and
+\IEEEauthorblockN{3\textsuperscript{rd} Jiawen Liu}
+\IEEEauthorblockA{\textit{Department of Electrical and Computer Engineering} \\
+\textit{University of Kentucky }\\
+Lexington, Kentucky, USA \\
+jli416@uky.edu}
+}
+
+\maketitle
+
+\begin{abstract}
+    This document outlines the design used to extend a Verilog multi-cycle
+    pipelined processor simulator. The objective of this project was to add
+    support for integer minimum (\texttt{min}), integer multiplication (\texttt{mult}), and jump
+    register (\texttt{jr}) functionalities.
+\end{abstract}
+
+\begin{IEEEkeywords}
+    
+\end{IEEEkeywords}
+
+\section{Introduction}
+This assignment was proposed as an introduction to the pipelined processor
+design taught in Dr. Hank Dietz's Computer Organization course. Herein, one
+learns all the components associated with a high-level understanding of
+processor design, advanced digital logic, and pipelining a processor's
+execution stages. Our assignment was to make a minimal number of changes to the
+instruction set architecture of a pipelined MIPS-based processor to add an
+integer minimum and integer multiplication instruction as well as a control
+flow instruction that jumps the instruction register to the value in a
+register.
+
+\section{Implemented Instructions}
+\subsection{The \texttt{min} Instruction}
+The \texttt{min} instruction compares the values in two registers and stores
+whichever value is lesser in the destination register. It is encoded as an
+\textbf{R-type} instruction with a \texttt{FUNCT} field of \texttt{0x01}. The
+two modifications to the code were as follows:
+\begin{itemize}
+    \item Firstly, the \textbf{decode stage} is modified to catch the case when
+        the \texttt{FUNCT} field reads an encoded \texttt{MIN} value. As we
+        store the result value in a register, we set the write-back flags to
+        suit (\texttt{RegDst=1, RegWrite=1}). Furthermore, a new ALU operation
+        \texttt{ALUMIN} is defined to signal the execution stage which ALU
+        operation to execute.
+    \item Secondly, the \textbf{execute stage} is modified to compute the
+        minimum value between its two inputs. This is performed using a ternary
+        operator \texttt{(ID\_s < ID\_src) ? ID\_s : ID\_src}.
+\end{itemize}
+Note that a min instruction that finds the minimum between a register and an
+immediate value can be trivially implemented with the changes made here.
+
+\subsection{The \texttt{mult} Instruction}
+The \texttt{mult} instruction performs an integer multiplication with values in
+two registers and stores the result in the destination register. It is encoded
+as an \textbf{R-type} instruction with a \texttt{FUNCT} field of \texttt{0x18}.
+The two modifications to the code were as follows:
+\begin{itemize}
+    \item Firstly, the \textbf{decode stage} is modified to catch the case when
+        the \texttt{FUNCT} field reads an encoded \texttt{MULT} value. As we
+        store the result value in a register, we set the write-back flags to
+        suit (\texttt{RegDst=1, RegWrite=1}). Furthermore, a new ALU operation
+        \texttt{ALUMULT} is defined to signal the execution stage which ALU
+        operation to execute.
+    \item Secondly, the \textbf{execute stage} is modified to compute the
+        product. This is performed using Verilog's native multiplication
+        operator \texttt{ID\_s * ID\_src}.
+\end{itemize}
+Note that a mult instruction that finds the product between a register and an
+immediate value can also be trivially implemented with the changes made here.
+
+\subsection{The \texttt{jr} Instruction}
+The \texttt{jr} instruction updates the program counter to the value stored in
+the input register \texttt{\$rs}. It is encoded as an \textbf{R-type}
+instruction with a \texttt{FUNCT} field of \texttt{0x08}. Implementing this
+required the modification of the following phases of the pipelined architecture:
+\begin{itemize}
+    \item Primarily, the \textbf{decode stage} is modified to catch the case when
+        the \texttt{FUNCT} field reads an encoded \texttt{JR} value. The
+        control logic of the decode stage was modified to signal a
+        \texttt{JumpReg} flag whenever the jump register is called. This is
+        used to multiplex the target address between the branch-or-next MUX and
+        the value stored in the \texttt{\$rs} register. As the processor's
+        branch prediction automatically assumes the branch is not taken, the
+        predictor's \texttt{squash} flag is set to true.
+    \item All the other stages are left unmodified as no registers or memory
+        addresses are operated on or modified.
+\end{itemize}
+
+\section{Testing and Verification}
+Testing was conducted by modifying the initial begin block of the processor
+module to preload specific test cases into memory (the \texttt{m} register
+block in the Verilog code). Trace outputs were checked to ensure the
+\textbf{write back} (\texttt{WB}) stage properly committed expected values.
+
+\section{Known Issues}
+During testing of the \texttt{jr} instruction, there was a structural/data hazard. The
+test sequence initially used an \texttt{addiu} instruction to load the target memory
+address into a register, immediately followed by the \texttt{jr} instruction attempting
+to read that register.
+
+Because the baseline pipeline forwarding logic does not safely handle immediate
+R-to-branch data dependencies, the processor fetched an incorrect ALU artifact
+instead of the resolved address. This was fixed for the local tests by
+introducing independent instructions between the \texttt{addiu} and \texttt{jr}
+instructions in the testbench. This allowed the address to safely get to the
+register file.
+
+\end{document}

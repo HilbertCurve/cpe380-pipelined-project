@@ -1,1 +1,5 @@
-./pipe
+**/pipe
+
+# pdflatex artifacts
+**/*.aux
+**/*.log
