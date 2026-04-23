@@ -38,9 +38,9 @@
 `define	LUI	6'h0f	// OP field
 `define	LW	6'h23	// OP field
 `define	SW	6'h2b	// OP field
-`define MIN	6'h01	// FUNCT field -- to be implemented!
-`define JR	6'h08	// FUNCT field -- to be implemented!
-`define MULT	6'h18	// FUNCT field -- to be implemented!
+`define MIN	6'h01	// FUNCT field 
+`define JR	6'h08	// FUNCT field 
+`define MULT	6'h18	// FUNCT field 
 `define	ADDU	6'h21	// FUNCT field
 `define	SUBU	6'h23	// FUNCT field
 `define	AND	6'h24	// FUNCT field
@@ -48,10 +48,12 @@
 `define	XOR	6'h26	// FUNCT field
 `define	SLTU	6'h2b	// FUNCT field
 
-// Simplified ALU codes, default to lui
+// Simplified ALU codes
 `define	ALUAND	4'b0000
 `define	ALUOR	4'b0001
 `define	ALUADD	4'b0010
+`define ALUMIN  4'b0011 // Added for min
+`define ALUMULT 4'b0100 // Added for mult
 `define	ALUSUB	4'b0110
 `define	ALUSLT	4'b0111
 `define	ALULUI	4'b1000
@@ -83,7 +85,28 @@ initial begin
     `IPACK(m[12], `LW, 2, 1, 1023)
     `IPACK(m[13], `SW, 0, 2, 1024)
     `IPACK(m[14], `ADDIU, 6, 6, 1)
-    m[15] = 0;
+
+    // NEW TEST CASES
+    `RPACK(m[15], 2, 3, 7, 0, `MIN)     // min $7, $2, $3 -> 1 < 42, $7 = 1
+    `RPACK(m[16], 3, 2, 8, 0, `MIN)     // min $8, $3, $2 -> 42 > 1, $8 = 1
+    `RPACK(m[17], 1, 3, 9, 0, `MULT)    // mult $9, $1, $3 -> 22 * 42, $9 = 924
+    
+    `IPACK(m[18], `ADDIU, 0, 10, 104)   // addiu $10, $0, 104 (Target address of m[26])
+    
+    // valid NOPs to clear hazard without halting
+    `RPACK(m[19], 0, 0, 0, 0, `OR)      
+    `RPACK(m[20], 0, 0, 0, 0, `OR)      
+    `RPACK(m[21], 0, 0, 0, 0, `OR)      
+    
+    `RPACK(m[22], 10, 0, 0, 0, `JR)     // jr $10 -> jumps to word 26
+    
+    `RPACK(m[23], 0, 0, 0, 0, `OR)      // NOP (will be squashed)
+    `RPACK(m[24], 0, 0, 0, 0, `OR)      // NOP (skipped over)
+    `RPACK(m[25], 0, 0, 0, 0, `OR)      // NOP (skipped over)
+    
+    `IPACK(m[26], `ADDIU, 0, 11, 99)    // Target: addiu $11, $0, 99
+    
+    m[27] = 0;                          // Illegal instruction to intentionally halt pipeline
     m[256] = 22;
 end
 
@@ -92,7 +115,7 @@ reg `ADDR IF_pc;
 reg `INST IF_ir;
 
 // ID registers
-reg RegDst, Branch, MemRead, MemWrite, ALUSrc, RegWrite, Bad, ID_MemRead, ID_MemWrite, ID_Bad;
+reg RegDst, Branch, MemRead, MemWrite, ALUSrc, RegWrite, Bad, JumpReg, ID_MemRead, ID_MemWrite, ID_Bad;
 reg `ALUOP ALUOp, ID_ALUOp;
 reg `WORD s, t, imm, ID_s, ID_t, ID_src;
 reg `REG ID_rd;
@@ -155,17 +178,21 @@ always @(posedge clk) if (running && !ID_Bad) begin
     ID_MemWrite <= 0; // not storing
     ID_Bad <= 0;
   end else begin
+    JumpReg = 0; // Default to 0 to prevent latches
     // Brute force decode of instruction
     case (squashed `OP)
       `RTYPE: begin
         case (squashed `FUNCT)
           `ADDU:   begin RegDst=1; Branch=0; MemRead=0; ALUOp=`ALUADD; MemWrite=0; ALUSrc=0; RegWrite=1; Bad=0; end
           `SUBU:   begin RegDst=1; Branch=0; MemRead=0; ALUOp=`ALUSUB; MemWrite=0; ALUSrc=0; RegWrite=1; Bad=0; end
-	  `AND:    begin RegDst=1; Branch=0; MemRead=0; ALUOp=`ALUAND; MemWrite=0; ALUSrc=0; RegWrite=1; Bad=0; end
-	  `OR:     begin RegDst=1; Branch=0; MemRead=0; ALUOp=`ALUOR;  MemWrite=0; ALUSrc=0; RegWrite=1; Bad=0; end
-	  `XOR:    begin RegDst=1; Branch=0; MemRead=0; ALUOp=`ALUXOR; MemWrite=0; ALUSrc=0; RegWrite=1; Bad=0; end
-	  `SLTU:   begin RegDst=1; Branch=0; MemRead=0; ALUOp=`ALUSLT; MemWrite=0; ALUSrc=0; RegWrite=1; Bad=0; end
-	  default: begin RegDst=0; Branch=0; MemRead=0; ALUOp=`ALUOR;  MemWrite=0; ALUSrc=0; RegWrite=0; Bad=1; end
+	      `AND:    begin RegDst=1; Branch=0; MemRead=0; ALUOp=`ALUAND; MemWrite=0; ALUSrc=0; RegWrite=1; Bad=0; end
+	      `OR:     begin RegDst=1; Branch=0; MemRead=0; ALUOp=`ALUOR;  MemWrite=0; ALUSrc=0; RegWrite=1; Bad=0; end
+	      `XOR:    begin RegDst=1; Branch=0; MemRead=0; ALUOp=`ALUXOR; MemWrite=0; ALUSrc=0; RegWrite=1; Bad=0; end
+	      `SLTU:   begin RegDst=1; Branch=0; MemRead=0; ALUOp=`ALUSLT; MemWrite=0; ALUSrc=0; RegWrite=1; Bad=0; end
+          `MIN:    begin RegDst=1; Branch=0; MemRead=0; ALUOp=`ALUMIN; MemWrite=0; ALUSrc=0; RegWrite=1; Bad=0; end
+          `MULT:   begin RegDst=1; Branch=0; MemRead=0; ALUOp=`ALUMULT;MemWrite=0; ALUSrc=0; RegWrite=1; Bad=0; end
+          `JR:     begin RegDst=0; Branch=0; MemRead=0; ALUOp=`ALUADD; MemWrite=0; ALUSrc=0; RegWrite=0; Bad=0; JumpReg=1; end
+	      default: begin RegDst=0; Branch=0; MemRead=0; ALUOp=`ALUOR;  MemWrite=0; ALUSrc=0; RegWrite=0; Bad=1; end
         endcase
       end
       `BEQ:    begin RegDst=0; Branch=1; MemRead=0; ALUOp=`ALUSUB; MemWrite=0; ALUSrc=0; RegWrite=0; Bad=0; end
@@ -183,9 +210,10 @@ always @(posedge clk) if (running && !ID_Bad) begin
     s = (canfwds ? fwds : r[squashed `RS]);
     t = (canfwdt ? fwdt : r[squashed `RT]);
     imm = {{16{squashed[15]}}, squashed `IMM};
-    target <= IF_pc + {imm[29:0], 2'b00};
-
-    squash <= (Branch && (s == t));
+    // JumpReg multiplexes the target calculation
+    target <= JumpReg ? s : (IF_pc + {imm[29:0], 2'b00});
+    // Squash unconditionally if JumpReg is high
+    squash <= (Branch && (s == t)) || JumpReg;
     ID_s <= s;
     ID_t <= t;
     ID_src <= (ALUSrc ? imm : t);
@@ -206,6 +234,8 @@ always @(posedge clk) if (running) begin
     `ALUSUB: alu = ID_s - ID_src;
     `ALUSLT: alu = ID_s < ID_src;
     `ALUXOR: alu = ID_s ^ ID_src;
+    `ALUMIN: alu = (ID_s < ID_src) ? ID_s : ID_src;
+    `ALUMULT: alu = ID_s * ID_src;
     default: alu = (ID_src << 16);
   endcase
 
@@ -219,7 +249,8 @@ end
 
 // MEM: data MEMory access stage
 always @(posedge clk) if (running) begin
-  if (EX_MemRead) v = m[EX_alu >> 2]; else v = EX_alu;
+  if (EX_MemRead) v = m[EX_alu >> 2];
+  else v = EX_alu;
   if (EX_MemWrite) m[EX_alu >> 2] <= EX_t;
 
   MEM_v <= v;
@@ -237,11 +268,13 @@ end
 always @(posedge clk) if (reset) begin
   halt<=0;
   r[0]<=0;
-  squash <= 0; target <= 0;
+  squash <= 0;
+  target <= 0;
   IF_ir<=`NOP; IF_pc<=0;
   ID_s<=0; ID_t<=0; ID_src<=0; ID_rd<=0; ID_MemRead<=0; ID_ALUOp<=0; ID_MemWrite<=0; ID_Bad<=0;
   EX_alu<=0; EX_t<=0; EX_rd<=0; EX_MemRead<=0; EX_MemWrite<=0; EX_Bad<=0;
-  MEM_v<=0; MEM_rd<=0; MEM_Bad<=0;
+  MEM_v<=0;
+  MEM_rd<=0; MEM_Bad<=0;
 end
 
 // State-by-state trace
@@ -256,11 +289,14 @@ always @(posedge clk) if (running) begin
       case (IF_ir `FUNCT)
         `ADDU:   $display("IF  addu $%1d,$%1d,$%1d", IF_ir `RD, IF_ir `RS, IF_ir `RT);
         `SUBU:   $display("IF  subu $%1d,$%1d,$%1d", IF_ir `RD, IF_ir `RS, IF_ir `RT);
-	`AND:    $display("IF  and $%1d,$%1d,$%1d", IF_ir `RD, IF_ir `RS, IF_ir `RT);
-	`OR:     $display("IF  or $%1d,$%1d,$%1d", IF_ir `RD, IF_ir `RS, IF_ir `RT);
-	`XOR:    $display("IF  xor $%1d,$%1d,$%1d", IF_ir `RD, IF_ir `RS, IF_ir `RT);
-	`SLTU:   $display("IF  sltu $%1d,$%1d,$%1d", IF_ir `RD, IF_ir `RS, IF_ir `RT);
-	default: $display("IF  OP=%x RS=%1d RT=%1d RD=%1d SHAMT=%1d FUNCT=%x", IF_ir `OP, IF_ir `RS, IF_ir `RT, IF_ir `RD, IF_ir `SHAMT, IF_ir `FUNCT);
+        `AND:    $display("IF  and $%1d,$%1d,$%1d", IF_ir `RD, IF_ir `RS, IF_ir `RT);
+        `OR:     $display("IF  or $%1d,$%1d,$%1d", IF_ir `RD, IF_ir `RS, IF_ir `RT);
+        `XOR:    $display("IF  xor $%1d,$%1d,$%1d", IF_ir `RD, IF_ir `RS, IF_ir `RT);
+        `SLTU:   $display("IF  sltu $%1d,$%1d,$%1d", IF_ir `RD, IF_ir `RS, IF_ir `RT);
+        `MIN:    $display("IF  min $%1d,$%1d,$%1d", IF_ir `RD, IF_ir `RS, IF_ir `RT);
+        `MULT:   $display("IF  mult $%1d,$%1d,$%1d", IF_ir `RD, IF_ir `RS, IF_ir `RT);
+        `JR:     $display("IF  jr $%1d", IF_ir `RS);
+        default: $display("IF  OP=%x RS=%1d RT=%1d RD=%1d SHAMT=%1d FUNCT=%x", IF_ir `OP, IF_ir `RS, IF_ir `RT, IF_ir `RD, IF_ir `SHAMT, IF_ir `FUNCT);
       endcase
     end
     `BEQ:    $display("IF  beq $%1d,$%1d,offset=$%1d", IF_ir `RT, IF_ir `RS, IF_ir `IMM);
@@ -281,7 +317,7 @@ always @(posedge clk) if (running) begin
   if (MEM_Bad) $display("MEM illegal instruction");
     else begin
       if (EX_MemWrite) $display("MEM m[%1d]=%1d v=%1d rd=%1d", EX_alu, EX_t, MEM_v, MEM_rd);
-        else $display("MEM v=%1d rd=%1d", MEM_v, MEM_rd);
+      else $display("MEM v=%1d rd=%1d", MEM_v, MEM_rd);
     end
   if (MEM_rd) $display("WB  r[%1d]=%1d", MEM_rd, MEM_v);
 end
@@ -306,5 +342,3 @@ initial begin
   end
 end
 endmodule
-
-
