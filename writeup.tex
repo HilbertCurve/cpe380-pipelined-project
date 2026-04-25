@@ -35,10 +35,12 @@ jli416@uky.edu}
 \maketitle
 
 \begin{abstract}
+    
     This document outlines the design used to extend a Verilog multi-cycle
     pipelined processor simulator. The objective of this project was to add
-    support for integer minimum (\texttt{min}), integer multiplication (\texttt{mult}), and jump
-    register (\texttt{jr}) functionalities.
+    support for integer minimum (\texttt{min}), integer multiplication (\texttt{mult}), and jump register (\texttt{jr}) functionalities. Among them, \texttt{min} and \texttt{mult} are arithmetic operation instructions and \texttt{jr} is a control transfer instruction that needs to be recognized in the decode stage (ID), generate the jump target address, and properly handle control hazards in the pipeline. We made full use of the forwarding unit and hazard detection mechanism from the original pipeline framework. Test results show that all three instructions execute correctly, with overall functionality meeting expectations.
+
+
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -46,17 +48,47 @@ jli416@uky.edu}
 \end{IEEEkeywords}
 
 \section{Introduction}
-This assignment was proposed as an introduction to the pipelined processor
-design taught in Dr. Hank Dietz's Computer Organization course. Herein, one
-learns all the components associated with a high-level understanding of
-processor design, advanced digital logic, and pipelining a processor's
-execution stages. Our assignment was to make a minimal number of changes to the
-instruction set architecture of a pipelined MIPS-based processor to add an
+
+\subsection{Background}
+Pipeline technology is one of the core methods in modern processor design. By dividing the instruction execution process into multiple independent stages, it effectively increases instruction-level parallelism, thereby improving processor throughput. However, pipelining also introduces issues such as data hazards, control hazards, and structural hazards, which must be addressed through mechanisms such as forwarding, stalling, and squashing.
+Our assignment is to make a minimal number of changes to the
+instruction set architecture of a MIPS-based processor pipeline to add an
 integer minimum and integer multiplication instruction as well as a control
 flow instruction that jumps the instruction register to the value in a
-register.
+register. Herein, one learns all the components associated with a high-level understanding of processor design, advanced digital logic, and pipelining a processor's
+execution stages.
+
+\subsection{Functions of the newly added instructions}
+min $\$rd, \$rs, \$rt$ : Compares the unsigned integer values in $\$rs$ and $\$rt$, and writes the smaller one into $\$rd$;
+
+mult $\$rd, \$rs, \$rt$ : Multiplies the 32-bit signed integer values in $\$rs$ and $\$rt$, and writes the lower 32 bits of the product into $\$rd$;
+
+jr $\$rs$ : Unconditionally sets the program counter (PC) to the value in $\$rs$ to perform a jump, where the jump target address of \texttt{jr} comes directly from the register.
+
+\subsection{Modification Approach and Challenges}
+Since the original processor already implements basic and complete forwarding and hazard detection logic, our modifications follow the principle of ``minimal changes'':
+For \texttt{min} and \texttt{mult}, it is sufficient to add recognition of the new function codes in the decode stage and extend the ALU operation types, without modifying the pipeline control signals.
+For \texttt{jr}, the challenge lies in the fact that it is a control transfer instruction. The jump target must be determined in the decode stage, and the fetch stage must be notified to squash the subsequently prefetched instructions. We reused the existing branch and squash mechanism and added a new \texttt{JumpReg} signal to select the register value when computing the target address.
 
 \section{Implemented Instructions}
+\subsection{Overall Modification Approach and Instruction Encoding Definition}
+The original processor is a standard 5-stage pipeline MIPS implementation (IF: instruction fetch, ID: instruction decode, EX: execution, MEM: memory access, WB: write-back), which already includes forwarding and hazard detection units. Our modifications follow the principle of "minimal changes":
+
+We do not modify the pipeline control logic or the pipeline register structure, and only add support for the new instructions in the modules that are used. In the macro definition area, we added three new function codes (FUNCT) and one new jump control signal:
+
+\begin{verbatim}
+`define MIN   6'h01
+`define JR    6'h08
+`define MULT  6'h18
+\end{verbatim}
+
+At the same time, to facilitate the management of ALU operation codes, we added two new ALU operation types:
+
+\begin{verbatim}
+`define ALUMIN  4'b0011
+`define ALUMULT 4'b0100
+\end{verbatim}
+
 \subsection{The \texttt{min} Instruction}
 The \texttt{min} instruction compares the values in two registers and stores
 whichever value is lesser in the destination register. It is encoded as an
@@ -74,7 +106,7 @@ two modifications to the code were as follows:
         operator \texttt{(ID\_s < ID\_src) ? ID\_s : ID\_src}.
 \end{itemize}
 Note that a min instruction that finds the minimum between a register and an
-immediate value can be trivially implemented with the changes made here.
+immediate value can be trivially implemented with the changes made here. Because the data flow of the \texttt{min} instruction is completely consistent with that of existing R-type instructions, and the forwarding unit of the original processor can already handle various data hazards of R-type instructions, no additional handling is required for \texttt{min}.
 
 \subsection{The \texttt{mult} Instruction}
 The \texttt{mult} instruction performs an integer multiplication with values in
@@ -93,7 +125,7 @@ The two modifications to the code were as follows:
         operator \texttt{ID\_s * ID\_src}.
 \end{itemize}
 Note that a mult instruction that finds the product between a register and an
-immediate value can also be trivially implemented with the changes made here.
+immediate value can also be trivially implemented with the changes made here. Regarding the data path, \texttt{mult}, like \texttt{min}, reuses the existing R-type data path, so the forwarding and hazard detection mechanisms take effect automatically.
 
 \subsection{The \texttt{jr} Instruction}
 The \texttt{jr} instruction updates the program counter to the value stored in
@@ -106,9 +138,28 @@ required the modification of the following phases of the pipelined architecture:
         control logic of the decode stage was modified to signal a
         \texttt{JumpReg} flag whenever the jump register is called. This is
         used to multiplex the target address between the branch-or-next MUX and
-        the value stored in the \texttt{\$rs} register. As the processor's
-        branch prediction automatically assumes the branch is not taken, the
-        predictor's \texttt{squash} flag is set to true.
+        the value stored in the \texttt{\$rs} register. When \texttt{JumpReg = 1} (for the \texttt{jr} instruction), \texttt{target} directly takes the value of \texttt{s} (i.e., the value of the \texttt{rs} register).
+
+When \texttt{JumpReg = 0} (for \texttt{beq} or other instructions), the original offset calculation method is used.
+
+As for the pipeline squashing mechanism, \texttt{jr}, like \texttt{beq}, requires squashing subsequent instructions that have already entered the pipeline once the jump is detected in the decode stage. We reused the existing \texttt{squash} signal:
+
+\begin{verbatim}
+squash <= (Branch && (s == t)) || JumpReg;
+\end{verbatim}
+
+For \texttt{beq}: \texttt{squash = 1} when the condition is satisfied.
+
+For \texttt{jr}: \texttt{squash = 1} unconditionally (because \texttt{JumpReg = 1}).
+
+The Fetch stage then determines the next instruction fetch address based on \texttt{squash} and \texttt{target}:
+
+\begin{verbatim}
+IF_ir <= m[(squash ? target : IF_pc) >> 2];
+IF_pc <= (squash ? target : IF_pc) + 4;
+\end{verbatim}
+
+When \texttt{squash = 1}, in the next cycle the instruction is fetched from the \texttt{target} address, and the PC is updated to \texttt{target + 4}.
     \item All the other stages are left unmodified as no registers or memory
         addresses are operated on or modified.
 \end{itemize}
@@ -133,3 +184,4 @@ instructions in the testbench. This allowed the address to safely get to the
 register file.
 
 \end{document}
+
