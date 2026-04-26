@@ -134,6 +134,7 @@ reg `REG MEM_rd;
 
 // Running state?
 wire running;
+wire ID_needs, ID_needt; 
 assign running = ((!halt) && (!reset));
 
 // Squash instruction fetched on a mispredicted branch
@@ -211,9 +212,9 @@ always @(posedge clk) if (running && !ID_Bad) begin
     t = (canfwdt ? fwdt : r[squashed `RT]);
     imm = {{16{squashed[15]}}, squashed `IMM};
     // JumpReg multiplexes the target calculation
-    target <= JumpReg ? s : (IF_pc + {imm[29:0], 2'b00});
+    target <= (JumpReg ? s : (IF_pc + {imm[29:0], 2'b00}));
     // Squash unconditionally if JumpReg is high
-    squash <= (Branch && (s == t)) || JumpReg;
+    squash <= ((Branch && (s == t)) || JumpReg);
     ID_s <= s;
     ID_t <= t;
     ID_src <= (ALUSrc ? imm : t);
